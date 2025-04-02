@@ -1,22 +1,145 @@
 /**
-response parsing script
-
+alpha vantage stock price API response parsing script
+flow action: Parse and Load stock symbol data - alpha vantage
+author: grok 
 */
 
 (function execute(inputs, outputs) {
-  // inputs.p_response
-  // outputs.response
-
-
-  // Parse the JSON string from the input
-  var payload = JSON.parse(inputs.p_response);
-  
-  if (false){
-    //parsing logic tbd
-  
-  } else {
-    // Fallback
-
-    outputs.response = inputs.p_response;
-  }
+    try {
+        outputs.log = '';
+        outputs.error_message = '';
+        var warnings = ''; // To collect warnings and debug messages
+        
+        // Debug: Starting execution
+        warnings += 'Starting script execution.\n';
+        
+        // Parse the JSON data from inputs.p_response
+        warnings += 'Attempting to parse JSON data.\n';
+        var jsonData = JSON.parse(inputs.p_response);
+        warnings += 'JSON parsed successfully.\n';
+        
+        // Validate that jsonData is an object and has required sections
+        warnings += 'Validating JSON structure.\n';
+        if (!jsonData || typeof jsonData !== 'object') {
+            throw new Error('Invalid JSON data');
+        }
+        if (!jsonData['Meta Data'] || !jsonData['Time Series (Daily)']) {
+            throw new Error('Missing Meta Data or Time Series in JSON');
+        }
+        warnings += 'JSON structure validated.\n';
+        
+        // Extract the stock symbol from Meta Data and convert to uppercase
+        warnings += 'Extracting stock symbol.\n';
+        var stockSymbol = jsonData['Meta Data']['2. Symbol'];
+        if (!stockSymbol) {
+            throw new Error('Missing stock symbol in Meta Data');
+        }
+        var stockSymbolUpper = stockSymbol.toUpperCase();
+        warnings += 'Stock symbol extracted: ' + stockSymbolUpper + '\n';
+        
+        // Look up or create the portfolio record
+        warnings += 'Initializing portfolio GlideRecord for table x_161520_ask_gen_0_stock_portfolio.\n';
+        var portfolioGr = new GlideRecord('x_161520_ask_gen_0_stock_portfolio');
+        warnings += 'Adding query for stock_symbol: ' + stockSymbolUpper + '\n';
+        portfolioGr.addQuery('stock_symbol', stockSymbolUpper);
+        warnings += 'Executing portfolio query.\n';
+        portfolioGr.query();
+        
+        var portfolioSysId; // Store the sys_id of the portfolio record
+        if (portfolioGr.next()) {
+            // Record found, get its sys_id
+            warnings += 'Portfolio record found.\n';
+            portfolioSysId = portfolioGr.getUniqueValue();
+            warnings += 'Portfolio sys_id retrieved: ' + portfolioSysId + ', type: ' + typeof portfolioSysId + '\n';
+        } else {
+            // No record found, create one
+            warnings += 'No portfolio record found, creating new one.\n';
+            portfolioGr.initialize();
+            warnings += 'Setting stock_symbol to ' + stockSymbolUpper + ' for new portfolio record.\n';
+            portfolioGr.setValue('stock_symbol', stockSymbolUpper);
+            warnings += 'Inserting new portfolio record.\n';
+            portfolioSysId = portfolioGr.insert();
+            if (!portfolioSysId) {
+                throw new Error('Failed to create portfolio record for ' + stockSymbolUpper);
+            }
+            warnings += 'New portfolio record inserted with sys_id: ' + portfolioSysId + ', type: ' + typeof portfolioSysId + '\n';
+        }
+        
+        // Query existing stock price records for this portfolio to prevent duplicates
+        warnings += 'Querying existing stock price records for portfolio sys_id: ' + portfolioSysId + '\n';
+        var existingDates = new Set();
+        var existingGr = new GlideRecord('x_161520_ask_gen_0_stock_prices');
+        existingGr.addQuery('stock_symbol', portfolioSysId);
+        existingGr.query();
+        while (existingGr.next()) {
+            var existingDate = existingGr.getValue('trade_date');
+            if (existingDate) {
+                existingDates.add(existingDate);
+            }
+        }
+        warnings += 'Found ' + existingDates.size + ' existing stock price records.\n';
+        
+        // Get the daily time series data
+        warnings += 'Retrieving Time Series (Daily) data.\n';
+        var timeSeries = jsonData['Time Series (Daily)'];
+        warnings += 'Time Series data retrieved, number of dates: ' + Object.keys(timeSeries).length + '\n';
+        
+        // Counters for inserted and skipped records
+        var count = 0;
+        var skippedCount = 0;
+        
+        // Iterate over each date in the time series
+        warnings += 'Starting iteration over time series dates.\n';
+        Object.keys(timeSeries).forEach(function(date) {
+            // Check if a record for this date already exists
+            if (existingDates.has(date)) {
+                skippedCount++;
+                return; // Skip insertion for existing dates
+            }
+            
+            var dailyData = timeSeries[date];
+            
+            // Check if required price fields are present
+            if (!dailyData['1. open'] || !dailyData['4. close']) {
+                warnings += 'Missing open or close price for date: ' + date + '\n';
+                return; // Skip this date
+            }
+            
+            // Extract open and close prices
+            var openPrice = dailyData['1. open'];
+            var closePrice = dailyData['4. close'];
+            
+            // Initialize a new GlideRecord for the stock prices table
+            var gr = new GlideRecord('x_161520_ask_gen_0_stock_prices');
+            gr.initialize();
+            
+            // Set the field values
+            gr.setValue('trade_date', date);
+            gr.setValue('open_price', openPrice);
+            gr.setValue('close_price', closePrice);
+            gr.setValue('stock_symbol', portfolioSysId); // Use the sys_id string
+            
+            // Insert the record into the table
+            var insertedId = gr.insert();
+            if (!insertedId) {
+                warnings += 'Date ' + date + ': Failed to insert record (no sys_id returned).\n';
+            } else {
+                count++;
+            }
+        });
+        
+        // Log summary of operations
+        warnings += 'Finished processing time series.\n';
+        warnings += 'Inserted ' + count + ' new records.\n';
+        warnings += 'Skipped ' + skippedCount + ' existing records.\n';
+        outputs.record_count = count;
+        
+        // Set the output response, including summary info and warnings
+        outputs.log = 'Successfully processed stock price data for ' + stockSymbolUpper + '\n' +
+                      'Inserted ' + count + ' new records, skipped ' + skippedCount + ' existing records.\n' + warnings;
+    } catch (e) {
+        // Log any errors and set the output response
+        outputs.error_message = 'Error: ' + e.message;
+        outputs.log += warnings; // Include debug info even on error
+    }
 })(inputs, outputs);
