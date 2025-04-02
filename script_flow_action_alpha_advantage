@@ -1,0 +1,53 @@
+/**
+flow action:  integration - get stock price data - alpha vantage
+@param {string} inputs.p_function  - time range for data output
+    function=TIME_SERIES_DAILY       
+    function=TIME_SERIES_WEEKLY
+    function=TIME_SERIES_MONTHLY
+@param {string} inputs.p_symbol    - stock ticker symbol 
+
+@outputs
+ outputs.status_code - http status code
+ outputs.response  - http response payload
+ outputs.error_message - http error message
+*/
+
+(function execute(inputs, outputs) {
+
+   var api_key = gs.getProperty('x_161520_ask_gen_0.stock_api_key');
+   var rm = new sn_ws.RESTMessageV2('Alpha Vantage', 'GET Query');
+
+        if (gs.nil(inputs.p_function)){
+            inputs.p_function = 'TIME_SERIES_DAILY';
+        }
+
+
+        // Set the input parameters for the REST request
+        rm.setStringParameter('api_key', api_key);
+        rm.setStringParameter('symbol', inputs.p_symbol);
+         rm.setStringParameter('function', inputs.p_function);
+
+        // Execute the REST request
+        var response = rm.execute();
+
+        // Check if a response was received
+        if (response) {
+            // Get the HTTP status code
+            var status = response.getStatusCode();
+            outputs.status_code = status;
+            outputs.response = response;
+
+            // If successful (HTTP 200), return the response body
+            if (status == 200) {
+                 outputs.response = response.getBody();
+            } else {
+                // Log an error if the status code indicates failure
+                outputs.error_message = 'Error calling Groq chat API: HTTP Status ' + status;
+               
+            }
+        } else {
+            // Log an error if no response was received
+            outputs.error_message = 'No response from Groq chat API';
+            
+        }
+})(inputs, outputs);
