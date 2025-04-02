@@ -1,0 +1,22 @@
+/**
+response parsing script
+
+*/
+
+(function execute(inputs, outputs) {
+  // inputs.p_response
+  // outputs.response
+
+
+  // Parse the JSON string from the input
+  var payload = JSON.parse(inputs.p_response);
+  
+  if (false){
+    //parsing logic tbd
+  
+  } else {
+    // Fallback
+
+    outputs.response = inputs.p_response;
+  }
+})(inputs, outputs);
