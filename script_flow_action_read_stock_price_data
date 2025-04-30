@@ -1,0 +1,87 @@
+
+/**
+flow action: Ask Groq - get Stock Price Data
+@param {string} inputs.p_lookback_days  - number of days to pull up data 
+@param {reference} inputs.p_rec_sysid    - stock ticker symbol record in table x_161520_ask_gen_0_stock_portfolio
+
+@outputs
+ outputs.price_data - price data for a given stock from the x_161520_ask_gen_0_stock_prices teable
+ outputs.log  - script execution log
+ outputs.error_message - error message
+*/
+
+
+(function execute(inputs, outputs) {
+    try {
+        var days_lookback = 30;
+        if (!gs.nil(inputs.p_lookback_days)){
+            days_lookback = inputs.p_lookback_days;
+        }
+        outputs.log = '';
+        outputs.error_message = '';
+        var warnings = ''; // Debug messages
+        
+        // Debug: Start execution
+        warnings += 'Starting read_stock_price_data execution.\n';
+        
+        // Validate input
+        var portfolioSysId = inputs.p_rec_sysid + '';
+        warnings += 'Input portfolio sys_id: ' + portfolioSysId + ', type: ' + typeof portfolioSysId + '\n';
+        if (!portfolioSysId) {
+            throw new Error('No portfolio sys_id provided');
+        }
+        
+        // Query portfolio record to get stock symbol
+        warnings += 'Querying x_161520_ask_gen_0_stock_portfolio for sys_id: ' + portfolioSysId + '\n';
+        var portfolioGr = new GlideRecord('x_161520_ask_gen_0_stock_portfolio');
+        if (!portfolioGr.get(portfolioSysId)) {
+            throw new Error('Portfolio record not found for sys_id: ' + portfolioSysId);
+        }
+        var stockSymbol = portfolioGr.getValue('stock_symbol');
+        warnings += 'Stock symbol retrieved: ' + stockSymbol + '\n';
+        if (!stockSymbol) {
+            throw new Error('Stock symbol is empty for portfolio sys_id: ' + portfolioSysId);
+        }
+        
+        // Query stock price data for the last 30 days
+        warnings += 'Querying x_161520_ask_gen_0_stock_prices for stock symbol: ' + stockSymbol + '\n';
+        var priceGr = new GlideRecord('x_161520_ask_gen_0_stock_prices');
+        priceGr.addQuery('stock_symbol', portfolioSysId); // Reference field uses portfolio sys_id
+        priceGr.addQuery('trade_date', '>=', gs.daysAgo(days_lookback));
+        priceGr.orderByDesc('trade_date'); // Most recent first
+        priceGr.query();
+        
+        // Collect price data
+        var priceData = [];
+        var recordCount = 0;
+        var str = '';
+        while (priceGr.next()) {
+            
+            str = '';
+            str += 'trade_date: '+ priceGr.getValue('trade_date');
+            str += ', '+ 'open_price: '+ priceGr.getValue('open_price');
+            str += ', '+ 'close_price: '+priceGr.getValue('close_price');
+           
+            priceData.push(str);
+            recordCount++;
+        }
+        warnings += 'Retrieved ' + recordCount + ' price records.\n';
+        
+        if (recordCount === 0) {
+            throw new Error('No price data found for stock symbol: ' + stockSymbol);
+        }
+        
+        // Format price data as JSON string
+        warnings += 'Formatting price data as JSON string.\n';
+        var priceDataString = priceData.join("\n");
+        warnings += 'Price data string length: ' + priceDataString.length + '\n';
+        
+        // Set outputs
+        outputs.price_data = priceDataString;
+        outputs.log = 'Successfully retrieved ' + recordCount + ' price records for ' + stockSymbol + '\n' + warnings;
+    } catch (e) {
+        // Log errors and debug info
+        outputs.error_message = 'Error: ' + e.message;
+        outputs.log = warnings + 'Error occurred: ' + e.message + '\n';
+    }
+})(inputs, outputs);
